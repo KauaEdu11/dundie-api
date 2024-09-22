@@ -8,27 +8,56 @@ from dundie.auth import SuperUser, AuthenticatedUser, CanChangeUserPassword
 from sqlalchemy.exc import IntegrityError
 from dundie.models.user import UserProfilePatchRequest
 from dundie.tasks.user import try_to_send_pwd_reset_email
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from pydantic import parse_obj_as
+from dundie.auth import ShowBalanceField
+from dundie.models.user import UserResponseWithBalance
 
 
 router = APIRouter()
 
 
-@router.get("/", response_model=List[UserResponse])
-async def list_users(*, session: Session = ActiveSession):
-    """List all users from database"""
+# list_users 
+
+@router.get(
+    "/",
+    response_model=List[UserResponse] | List[UserResponseWithBalance],
+    response_model_exclude_unset=True,
+)
+async def list_users(
+    *, session: Session = ActiveSession, show_balance_field: bool = ShowBalanceField
+):
+    """List all users.
+
+    NOTES:
+    - This endpoint can be accessed with a token authentication
+    - show_balance query parameter takes effect only for authenticated superuser.
+    """
     users = session.exec(select(User)).all()
+    if show_balance_field:
+        users_with_balance = parse_obj_as(List[UserResponseWithBalance], users)
+        return JSONResponse(jsonable_encoder(users_with_balance))
     return users
 
 
-@router.get("/{username}/", response_model=UserResponse)
+# get user by username 
+@router.get(
+    "/{username}/",
+    response_model=UserResponse | UserResponseWithBalance,
+    response_model_exclude_unset=True,
+)
 async def get_user_by_username(
-    *,
-    session: Session = ActiveSession, 
-    username: str
+    *, session: Session = ActiveSession, username: str, show_balance_field: bool = ShowBalanceField
 ):
-    """Get single user by Username"""
+    """Get user by username"""
     query = select(User).where(User.username == username)
     user = session.exec(query).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if show_balance_field:
+        user_with_balance = parse_obj_as(UserResponseWithBalance, user)
+        return JSONResponse(jsonable_encoder(user_with_balance))
     return user
 
 
